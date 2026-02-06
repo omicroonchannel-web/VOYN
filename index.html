@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VOY v4.0 | AI & PUA</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        :root { --bg: #121212; --panel: #1e1e1e; --primary: #7289da; --text: #e0e0e0; --accent: #f1c40f; --danger: #e74c3c; --ai: #00d2ff; }
+        body { margin: 0; background: var(--bg); color: var(--text); font-family: sans-serif; height: 100vh; display: flex; justify-content: center; }
+        #app { width: 100%; max-width: 500px; background: var(--panel); display: flex; flex-direction: column; border-left: 1px solid #333; border-right: 1px solid #333; position: relative; }
+        .screen { display: none; flex-direction: column; height: 100%; }
+        .active { display: flex; }
+        input, textarea, button, select { background: #2c2c2c; border: 1px solid #444; color: white; padding: 12px; border-radius: 6px; margin: 5px 0; outline: none; width: 100%; box-sizing: border-box; }
+        button { background: var(--primary); cursor: pointer; border: none; font-weight: bold; width: auto; transition: 0.2s; }
+        button:hover { filter: brightness(1.1); }
+        .btn-danger { background: var(--danger); }
+        .btn-ai { background: var(--ai); color: #000; }
+        .btn-small { padding: 4px 8px; font-size: 0.8em; width: auto; display: inline-block; margin: 0; }
+        .row { display: flex; gap: 5px; }
+        .header { background: #252525; padding: 10px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #333; }
+        .ava { width: 32px; height: 32px; border-radius: 50%; background: #555; object-fit: cover; cursor: pointer; }
+        .msgs-area { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+        
+        .msg { padding: 8px 12px; border-radius: 8px; background: #333; max-width: 85%; word-break: break-word; position: relative; }
+        .msg.my { align-self: flex-end; background: #3f4769; }
+        .msg.sys { align-self: center; background: #2c3e50; border: 1px solid var(--primary); max-width: 95%; font-size: 0.9em; }
+        .msg.ai { align-self: flex-start; background: #003847; border: 1px solid var(--ai); }
+        .msg img { max-width: 100%; border-radius: 5px; margin-top: 5px; display: block; }
+        
+        .reply-ctx { border-left: 3px solid var(--accent); background: rgba(0,0,0,0.2); padding: 4px; font-size: 0.8em; margin-bottom: 4px; border-radius: 4px; opacity: 0.8; cursor: pointer; }
+        .reply-bar { display: none; background: #222; padding: 5px 10px; border-top: 1px solid var(--accent); font-size: 0.8em; align-items: center; justify-content: space-between; }
+        
+        .pinned-bar { background: #2c3e50; padding: 8px 15px; border-bottom: 1px solid var(--accent); font-size: 0.9em; display: none; align-items: center; justify-content: space-between; }
+        #pua-grid { display: none; grid-template-columns: repeat(6, 1fr); gap: 4px; background: #111; padding: 8px; max-height: 200px; overflow-y: auto; border-top: 1px solid #333; }
+        /* Глобальный класс шрифтов */
+        .pua-font { font-family: 'GlobalPUA', sans-serif; } 
+        .pua-key { height: 40px; background: #222; display: flex; align-items: center; justify-content: center; cursor: pointer; border-radius: 4px; font-size: 1.2em; }
+        
+        .msg-tools { display: flex; gap: 5px; margin-top: 4px; opacity: 0.5; font-size: 0.7em; }
+        .msg:hover .msg-tools { opacity: 1; }
+        
+        .user-card { background: #252525; padding: 10px; border-radius: 8px; margin-bottom: 5px; display: flex; align-items: center; gap: 10px; cursor: pointer; }
+        .badge-admin { background: var(--accent); color: black; padding: 2px 5px; border-radius: 4px; font-size: 0.7em; font-weight: bold; }
+
+        .tabs { display: flex; border-bottom: 1px solid #333; }
+        .tab { flex: 1; padding: 10px; text-align: center; cursor: pointer; background: #1e1e1e; }
+        .tab.active-tab { background: #333; border-bottom: 2px solid var(--primary); font-weight: bold; }
+        .list-section { display: none; flex: 1; padding: 10px; overflow-y: auto; }
+        .list-section.active-list { display: block; }
+        a { color: var(--primary); text-decoration: none; }
+    </style>
+</head>
+<body>
+
+<div id="app">
+    <div id="scr-auth" class="screen active" style="padding:30px; justify-content: center;">
+        <h1 style="text-align:center; color: var(--primary)">VOY v4.0 <small style="font-size:0.5em">AI Edition</small></h1>
+        <input id="au-u" placeholder="Логин">
+        <input id="au-p" type="password" placeholder="Пароль">
+        <div class="row"><button style="flex:1" onclick="auth('login')">ВОЙТИ</button><button style="flex:1; background:#444" onclick="auth('register')">РЕГИСТРАЦИЯ</button></div>
+    </div>
+
+    <div id="scr-lobby" class="screen">
+        <div class="header">
+            <img id="my-ava-mini" class="ava" onclick="show('scr-profile')">
+            <div style="flex:1"><b id="my-nick-disp">User</b> <span id="admin-tag" style="display:none" class="badge-admin">GLOBAL ADMIN</span></div>
+            <button class="btn-small" onclick="socket.emit('refresh_lists')">↻</button>
+        </div>
+        
+        <div style="padding:10px; background:#222; border-bottom:1px solid #333">
+            <div class="row">
+                <input id="search-in" placeholder="Поиск людей..." style="margin:0">
+                <button onclick="searchUsers()" style="width:auto">🔍</button>
+            </div>
+            <div id="search-res" style="max-height:100px; overflow-y:auto; margin-top:5px;"></div>
+        </div>
+
+        <div class="tabs">
+            <div class="tab active-tab" onclick="switchTab('rooms')">Комнаты</div>
+            <div class="tab" onclick="switchTab('dms')">ЛС</div>
+        </div>
+
+        <div id="list-rooms" class="list-section active-list"></div>
+        <div id="list-dms" class="list-section"></div>
+        
+        <div style="padding:10px; border-top:1px solid #333">
+            <input id="new-room-title" placeholder="Название комнаты">
+            <div class="row">
+                <input id="new-room-pass" type="password" placeholder="Пароль (опц)" style="flex:1">
+                <select id="new-room-mode" style="width:100px"><option value="chat">Чат</option><option value="channel">Канал</option></select>
+            </div>
+            <button onclick="createRoom()" style="width:100%">+ Создать комнату</button>
+        </div>
+    </div>
+
+    <div id="scr-chat" class="screen">
+        <div class="header">
+            <button onclick="show('scr-lobby')" style="width:auto">←</button>
+            <div style="flex:1; overflow:hidden; white-space:nowrap; text-overflow:ellipsis"><b id="chat-title">...</b></div>
+            <button id="btn-toggle-ai" class="btn-small btn-ai" onclick="toggleAI()" style="display:none">🤖 ВКЛ AI</button>
+        </div>
+        <div id="pinned-msg" class="pinned-bar"><span id="pin-text">📌 Закреп</span><button onclick="unpin()" id="unpin-ui" class="btn-small">✕</button></div>
+        
+        <div id="msgs-cont" class="msgs-area"></div>
+        
+        <div id="reply-ui" class="reply-bar">
+            <span id="reply-target-text">Ответ...</span>
+            <button onclick="cancelReply()" class="btn-small btn-danger">✕</button>
+        </div>
+
+        <div id="pua-grid"></div>
+        <div style="padding:10px; background:#252525; display:flex; align-items:center; gap:8px; flex-wrap:wrap">
+            <div class="row" style="width:100%">
+                 <label style="font-size:1.5em; cursor:pointer; width:auto">📎<input type="file" id="f-upl" hidden onchange="sendFile()"></label>
+                 <button onclick="togglePUA()" style="width:auto">⌨ PUA</button>
+                 <button onclick="insertAICommand()" style="width:auto; background:var(--ai); color:#000">✨</button>
+            </div>
+            <div class="row" style="width:100%">
+                <input id="m-in" placeholder="Сообщение... (!админ, !факт)" style="margin:0">
+                <button onclick="sendMsg()" style="width:auto">➤</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="scr-profile" class="screen">
+        <div class="header"><button onclick="show('scr-lobby')">←</button><b>Мой Профиль</b></div>
+        <div style="padding:20px; overflow-y:auto; text-align:center">
+            <img id="p-ava-view" style="width:100px; height:100px; border-radius:50%; background:#333; object-fit:cover">
+            <input type="file" id="p-ava-file" hidden onchange="previewAva()">
+            <button onclick="document.getElementById('p-ava-file').click()">Сменить аватарку</button>
+            <textarea id="p-bio" placeholder="О себе..."></textarea>
+            
+            <div id="admin-font-zone" style="display:none; margin-top:15px; border:1px solid var(--accent); padding:10px;">
+                <h4>Глобальные шрифты (Admin)</h4>
+                <input type="file" id="g-font-upl" accept=".ttf,.otf">
+                <button onclick="uploadGlobalFont()" style="background:#27ae60">Загрузить шрифт для всех</button>
+            </div>
+
+            <button onclick="saveProfile()" style="margin-top:20px; width:100%">Сохранить</button>
+            <button onclick="logout()" class="btn-danger" style="width:100%">Выйти</button>
+        </div>
+    </div>
+
+    <div id="scr-other" class="screen">
+        <div class="header"><button onclick="show('scr-lobby')">←</button><b>Пользователь</b></div>
+        <div style="padding:20px; text-align:center">
+            <img id="oth-ava" style="width:100px; height:100px; border-radius:50%; background:#333; object-fit:cover">
+            <h2 id="oth-nick">User</h2>
+            <button onclick="startDM()" style="background:var(--primary); margin-bottom:15px;">✉️ НАПИСАТЬ СООБЩЕНИЕ</button>
+            
+            <div id="oth-bio" style="background:#333; padding:10px; border-radius:8px; margin:10px 0; white-space: pre-wrap;"></div>
+            
+            <div id="admin-controls" style="display:none; margin-top:20px; border-top:1px solid #444; padding-top:10px;">
+                <h3 style="color:var(--danger)">Admin Zone</h3>
+                <button onclick="banCurrentViewedUser()" class="btn-danger">ЗАБАНИТЬ ПОЛЬЗОВАТЕЛЯ</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const socket = io();
+    let me = null, curRoom = null, replyTo = null, viewingUser = null;
+    let isRoomAdmin = false;
+
+    // --- Font Loader ---
+    // Теперь шрифты глобальные, грузим список
+    function loadGlobalFonts(fontList) {
+        // Удаляем старые
+        document.querySelectorAll('.dyn-font').forEach(e => e.remove());
+        let css = "";
+        fontList.forEach(f => {
+            css += `@font-face { font-family: 'GlobalPUA'; src: url('${f}?v=${Date.now()}'); } `;
+        });
+        const style = document.createElement('style');
+        style.className = 'dyn-font';
+        style.innerHTML = css; 
+        document.head.appendChild(style);
+    }
+
+    const toBase64 = f => new Promise((res, rej) => { const r = new FileReader(); r.readAsDataURL(f); r.onload = () => res(r.result); r.onerror = e => rej(e); });
+    function show(id) { document.querySelectorAll('.screen').forEach(s => s.classList.remove('active')); document.getElementById(id).classList.add('active'); }
+
+    // --- Auth ---
+    function auth(type) {
+        const u = document.getElementById('au-u').value, p = document.getElementById('au-p').value;
+        if(u && p) socket.emit(type, { username: u, password: p });
+    }
+
+    socket.on('auth_ok', user => {
+        me = user;
+        localStorage.setItem('voy_u', user.username);
+        if(!user.isAdmin) localStorage.setItem('voy_p', document.getElementById('au-p').value);
+        
+        document.getElementById('my-nick-disp').innerText = me.username;
+        document.getElementById('my-ava-mini').src = me.avatar || '';
+        document.getElementById('admin-tag').style.display = me.isAdmin ? 'inline-block' : 'none';
+        document.getElementById('admin-font-zone').style.display = me.isAdmin ? 'block' : 'none';
+
+        show('scr-lobby');
+        socket.emit('request_global_fonts'); // Запрос шрифтов при входе
+    });
+
+    socket.on('fonts_list', list => loadGlobalFonts(list));
+
+    // --- Lobby ---
+    function switchTab(tab) {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active-tab'));
+        document.querySelectorAll('.list-section').forEach(l => l.classList.remove('active-list'));
+        if(tab === 'rooms') {
+            document.querySelectorAll('.tab')[0].classList.add('active-tab');
+            document.getElementById('list-rooms').classList.add('active-list');
+        } else {
+            document.querySelectorAll('.tab')[1].classList.add('active-tab');
+            document.getElementById('list-dms').classList.add('active-list');
+        }
+    }
+
+    socket.on('update_rooms', rooms => {
+        const l = document.getElementById('list-rooms'); l.innerHTML = '';
+        Object.values(rooms).forEach(r => {
+            const d = document.createElement('div');
+            d.style = "padding:12px; margin-bottom:5px; background:#333; border-radius:6px; position:relative";
+            let delBtn = (me && (me.username === r.owner || me.isAdmin)) ? `<button class="btn-danger btn-small" style="float:right; margin-left:10px" onclick="deleteRoom('${r.id}', event)">🗑</button>` : '';
+            let aiBadge = r.aiActive ? `<span style="color:var(--ai)">🤖</span>` : '';
+            d.innerHTML = `<div><b>${r.mode === 'channel' ? '📢' : '#'} ${r.title}</b> ${aiBadge} ${r.hasPass ? '🔒' : ''} ${delBtn}</div>
+                           <div style="font-size:0.8em; opacity:0.6">Создатель: ${r.owner}</div>`;
+            d.onclick = (e) => {
+                if(e.target.tagName === 'BUTTON') return;
+                let pass = r.hasPass ? prompt("Введите пароль от комнаты:") : null;
+                curRoom = r.id; socket.emit('join_room', { id: r.id, password: pass });
+            };
+            l.appendChild(d);
+        });
+    });
+
+    socket.on('update_dms', dms => {
+        const l = document.getElementById('list-dms'); l.innerHTML = '';
+        const list = Object.values(dms);
+        if(list.length === 0) l.innerHTML = '<div style="color:#777; text-align:center; padding:20px">Нет личных сообщений</div>';
+        list.forEach(r => {
+            const other = r.participants.find(u => u !== me.username) || me.username;
+            const d = document.createElement('div');
+            d.className = 'user-card';
+            d.innerHTML = `<b>💬 ${other}</b>`;
+            d.onclick = () => { curRoom = r.id; socket.emit('join_room', { id: r.id }); };
+            l.appendChild(d);
+        });
+    });
+
+    function createRoom() {
+        const t = document.getElementById('new-room-title').value;
+        const p = document.getElementById('new-room-pass').value;
+        const m = document.getElementById('new-room-mode').value;
+        if(t) socket.emit('create_room', { title: t, password: p, mode: m });
+    }
+    function deleteRoom(id, e) { e.stopPropagation(); if(confirm('Удалить?')) socket.emit('delete_room', id); }
+
+    // --- Chat ---
+    socket.on('room_history', r => {
+        document.getElementById('chat-title').innerText = r.title;
+        document.getElementById('msgs-cont').innerHTML = '';
+        cancelReply();
+        
+        // Права админа комнаты
+        isRoomAdmin = r.admins.includes(me.username) || r.owner === me.username || me.isAdmin;
+
+        // Кнопка AI
+        const btnAi = document.getElementById('btn-toggle-ai');
+        if(isRoomAdmin && !r.isDm) {
+            btnAi.style.display = 'block';
+            btnAi.innerText = r.aiActive ? "🤖 ОТКЛ AI" : "🤖 ВКЛ AI";
+            btnAi.style.background = r.aiActive ? "#444" : "var(--ai)";
+        } else {
+            btnAi.style.display = 'none';
+        }
+
+        r.msgs.forEach(addMsg);
+        updatePinUI(r.pinned);
+        show('scr-chat');
+    });
+
+    function startDM() { if(viewingUser) socket.emit('start_dm', viewingUser); }
+    socket.on('dm_ready', (roomId) => { curRoom = roomId; socket.emit('join_room', { id: roomId }); });
+
+    function startReply(id, txt, user) {
+        replyTo = { id, txt, user };
+        document.getElementById('reply-ui').style.display = 'flex';
+        document.getElementById('reply-target-text').innerText = `Ответ ${user}: ${txt.substring(0, 20)}...`;
+        document.getElementById('m-in').focus();
+    }
+    function cancelReply() { replyTo = null; document.getElementById('reply-ui').style.display = 'none'; }
+
+    function insertAICommand() {
+        document.getElementById('m-in').value = "!нейро ";
+        document.getElementById('m-in').focus();
+    }
+
+    function toggleAI() {
+        socket.emit('toggle_ai', curRoom);
+    }
+
+    function sendMsg() {
+        const txt = document.getElementById('m-in').value;
+        if(txt) { 
+            socket.emit('send_msg', { roomId: curRoom, text: txt, type: 'text', replyTo: replyTo }); 
+            document.getElementById('m-in').value = ''; 
+            cancelReply();
+        }
+    }
+    async function sendFile() {
+        const f = document.getElementById('f-upl').files[0];
+        if(!f || !curRoom) return;
+        const b64 = await toBase64(f);
+        socket.emit('send_msg', { roomId: curRoom, file: b64, type: f.type.startsWith('image') ? 'img' : 'file', text: f.name });
+    }
+
+    socket.on('new_msg', addMsg);
+    socket.on('msg_deleted', id => { const e = document.getElementById(`m-${id}`); if(e) e.remove(); });
+    socket.on('update_pin', msg => updatePinUI(msg));
+    socket.on('update_room_meta', d => {
+        // Обновление статуса AI или админов в реалтайме
+        if(curRoom === d.roomId) {
+            const btnAi = document.getElementById('btn-toggle-ai');
+            if(isRoomAdmin && !d.isDm) {
+                btnAi.innerText = d.aiActive ? "🤖 ОТКЛ AI" : "🤖 ВКЛ AI";
+                btnAi.style.background = d.aiActive ? "#444" : "var(--ai)";
+            }
+        }
+    });
+
+    function addMsg(m) {
+        const c = document.getElementById('msgs-cont');
+        const d = document.createElement('div');
+        d.id = `m-${m.id}`;
+        
+        const isSys = m.user === 'System';
+        const isAi = m.user === 'Neuro';
+        d.className = `msg ${m.user === me.username ? 'my' : ''} ${isSys ? 'sys' : ''} ${isAi ? 'ai' : ''} pua-font`;
+        
+        let content = m.text;
+        if(m.type === 'img') content = `<img src="${m.file}">`;
+        if(m.type === 'file') content = `<a href="${m.file}" download="${m.text}">📄 ${m.text}</a>`;
+        // Текст наследует pua-font глобально
+
+        let replyHtml = '';
+        if (m.replyTo) replyHtml = `<div class="reply-ctx" onclick="document.getElementById('m-${m.replyTo.id}')?.scrollIntoView({behavior:'smooth', block:'center'})"><b>${m.replyTo.user}:</b> ${m.replyTo.txt.substring(0,30)}</div>`;
+
+        let adminTools = '';
+        if((isRoomAdmin) && !isSys) {
+            adminTools = `<button class="btn-small btn-danger" onclick="delMsg('${m.id}')">Del</button> 
+                          <button class="btn-small" onclick="pinMsg('${m.id}')">Pin</button>`;
+        }
+        
+        const userDisplay = isSys ? `<b>SYSTEM</b>` : `<span onclick="viewProfile('${m.user}')" style="cursor:pointer; font-weight:bold">${m.user}</span>`;
+
+        d.innerHTML = `${replyHtml}
+                       <div style="font-size:0.7em; opacity:0.6; display:flex; justify-content:space-between">
+                           ${userDisplay} <span>${m.time}</span>
+                       </div>
+                       ${content}
+                       ${!isSys ? `<div class="msg-tools"><button class="btn-small" onclick="startReply('${m.id}', '${m.type==='text'?m.text:'[File]'}', '${m.user}')">↩</button>${adminTools}</div>` : ''}`;
+        
+        c.appendChild(d); c.scrollTop = c.scrollHeight;
+    }
+
+    function delMsg(id) { socket.emit('delete_msg', { roomId: curRoom, msgId: id }); }
+    function pinMsg(id) { socket.emit('pin_msg', { roomId: curRoom, msgId: id }); }
+    function unpin() { socket.emit('pin_msg', { roomId: curRoom, msgId: null }); }
+    function updatePinUI(msg) {
+        const bar = document.getElementById('pinned-msg');
+        if(msg) {
+            bar.style.display = 'flex'; 
+            document.getElementById('pin-text').innerText = "📌 " + (msg.type === 'text' ? msg.text : "Файл/Фото");
+            document.getElementById('unpin-ui').style.display = isRoomAdmin ? 'block' : 'none';
+        } else { bar.style.display = 'none'; }
+    }
+
+    // --- Search & Profiles ---
+    function searchUsers() { const q = document.getElementById('search-in').value; if(q) socket.emit('search_users', q); }
+    socket.on('search_results', res => {
+        const c = document.getElementById('search-res'); c.innerHTML = '';
+        res.forEach(u => {
+            const d = document.createElement('div'); d.className = 'user-card';
+            d.innerHTML = `<img src="${u.avatar||''}" style="width:24px;height:24px;border-radius:50%;background:#555"> <b>${u.username}</b>`;
+            d.onclick = () => viewProfile(u.username);
+            c.appendChild(d);
+        });
+        if(res.length===0) c.innerHTML='<div style="padding:5px;color:#777">Пусто</div>';
+    });
+
+    function viewProfile(name) {
+        if(name === me.username) return show('scr-profile');
+        if(name === 'System' || name === 'Neuro') return;
+        viewingUser = name;
+        socket.emit('get_other_profile', name);
+    }
+    socket.on('show_other_profile', p => {
+        document.getElementById('oth-nick').innerText = p.username;
+        document.getElementById('oth-bio').innerText = p.bio || "Нет информации.";
+        document.getElementById('oth-ava').src = p.avatar || '';
+        const adm = document.getElementById('admin-controls');
+        if (me.isAdmin && p.username !== 'Омикрун') {
+            adm.style.display = 'block';
+        } else { adm.style.display = 'none'; }
+        show('scr-other');
+    });
+    function banCurrentViewedUser() { if(viewingUser && confirm(`ЗАБАНИТЬ ${viewingUser}?`)) { socket.emit('ban_user', viewingUser); show('scr-lobby'); } }
+
+    // --- My Profile & Admin Fonts ---
+    async function uploadGlobalFont() { 
+        const f = document.getElementById('g-font-upl').files[0]; 
+        if(f) socket.emit('admin_upload_font', { file: await toBase64(f), name: f.name }); 
+    }
+    async function saveProfile() { const bio = document.getElementById('p-bio').value, avaSrc = document.getElementById('p-ava-view').src; socket.emit('update_profile', { bio, avatar: avaSrc.startsWith('data:') ? avaSrc : null }); }
+    function previewAva() { toBase64(document.getElementById('p-ava-file').files[0]).then(r => document.getElementById('p-ava-view').src = r); }
+    function logout() { localStorage.clear(); location.reload(); }
+    
+    // --- PUA Grid ---
+    function togglePUA() { 
+        const g = document.getElementById('pua-grid'); 
+        if(g.innerHTML === '') {
+            for(let i=0; i<60; i++) {
+                let char = String.fromCharCode(0xE000 + i);
+                let b = document.createElement('div'); 
+                // Применяем pua-font, чтобы видеть символы во всех загруженных шрифтах
+                b.className = `pua-key pua-font`; 
+                b.innerText = char;
+                b.onclick = () => document.getElementById('m-in').value += char;
+                g.appendChild(b);
+            }
+        }
+        g.style.display = g.style.display === 'grid' ? 'none' : 'grid';
+    }
+
+    socket.on('error', m => alert(m));
+    socket.on('alert', m => alert(m));
+
+    window.onload = () => {
+        const u = localStorage.getItem('voy_u'), p = localStorage.getItem('voy_p');
+        if(u && p) { document.getElementById('au-u').value = u; document.getElementById('au-p').value = p; auth('login'); }
+    }
+</script>
+</body>
+</html>
